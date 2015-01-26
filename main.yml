@@ -1,0 +1,44 @@
+---
+- hosts: localhost
+  connection: local
+  sudo: true
+  tasks:
+    - name: Update and install packages
+      action: yum name={{item}} state=latest
+      with_items:
+        - tor
+        - openssh-clients
+        - gnupg
+      notify: Restart tor
+    - name: Grab tor UID
+      action: command id -u toranon
+      register: tor_uid
+    - name: Configure tor
+      notify: Restart tor
+      action: template src=tor.conf dest=/etc/tor/torrc
+    - name: Configure selinux for tor
+      action: seboolean name=tor_bind_all_unreserved_ports persistent=yes state=yes
+    - name: Enable tor
+      action: service name=tor state=running
+    - name: Create firewalld chains
+      action: command firewall-cmd --permanent --direct --add-chain ipv4 {{item}} tor
+      with_items:
+        - nat
+        - filter
+    - name: Configure chains
+      action: command firewall-cmd --permanent --direct --add-rule ipv4 {{item}}
+      with_items:
+        - nat tor 0 -m owner --uid-owner {{tor_uid.stdout}} -j RETURN
+        - nat tor 1 -p udp --dport 53 -j REDIRECT --to-ports 53
+        - nat tor 2 -d 127.0.0.0/8 -j RETURN
+        - nat tor 3 -p tcp --syn -j REDIRECT --to-ports 9040
+        - filter tor 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+        - filter tor 0 ! -o lo ! -d 127.0.0.1 ! -s 127.0.0.1 -p tcp -m tcp --tcp-flags ACK,FIN ACK,RST -j DROP
+        - filter tor 1 -m owner --uid-owner {{tor_uid.stdout}} -j ACCEPT
+        - filter tor 2 -d 127.0.0.1/8 -j RETURN
+        - filter tor 3 -j REJECT
+        - nat OUTPUT 0 -j tor
+        - filter OUTPUT 0 -j tor
+  handlers:
+    - name: Restart tor
+      action: service name=tor state=restarted
