@@ -3,6 +3,10 @@
   connection: local
   sudo: true
   tasks:
+    - name: Import tor repo keys
+      action: rpm_key state=present key=https://deb.torproject.org/torproject.org/rpm/RPM-GPG-KEY-torproject.org.asc
+    - name: Configure tor repos
+      action: template src=tor.repo dest=/etc/yum.repos.d/tor.repo
     - name: Update and install packages
       action: yum name={{item}} state=latest
       with_items:
@@ -19,7 +23,7 @@
     - name: Configure selinux for tor
       action: seboolean name=tor_bind_all_unreserved_ports persistent=yes state=yes
     - name: Enable tor
-      action: service name=tor state=running
+      action: service name=tor state=started enabled=yes
     - name: Create firewalld chains
       action: command firewall-cmd --permanent --direct --add-chain ipv4 {{item}} tor
       with_items:
